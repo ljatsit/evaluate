@@ -467,7 +467,7 @@
             if (p >= 96) {
                 return {
                     grade: 'A+',
-                    label: '',
+                    label: 'ຄະແນນ 96-100',
                     recommendation: 'ຜົນການປະເມີນຫຼັງຈາກທີ່ທ່ານປະເມີນສຳເລັດ. ທ່ານຈະບໍ່ສາມາດແກ້ໄຂຫຍັງໄດ້',
                     bgClass: 'bg-emerald-500',
                     textClass: 'text-emerald-700',
@@ -478,7 +478,7 @@
             } else if (p >= 86) {
                 return {
                     grade: 'A',
-                    label: '',
+                    label: 'ຄະແນນ 86-95',
                     recommendation: 'ຜົນການປະເມີນຫຼັງຈາກທີ່ທ່ານປະເມີນສຳເລັດ. ທ່ານຈະບໍ່ສາມາດແກ້ໄຂຫຍັງໄດ້',
                     bgClass: 'bg-blue-500',
                     textClass: 'text-blue-700',
@@ -489,7 +489,7 @@
             } else {
                 return {
                     grade: 'B',
-                    label: '',
+                    label: 'ຄະແນນ 0-85',
                     recommendation: 'ຜົນການປະເມີນຫຼັງຈາກທີ່ທ່ານປະເມີນສຳເລັດ. ທ່ານຈະບໍ່ສາມາດແກ້ໄຂຫຍັງໄດ້',
                     bgClass: 'bg-rose-500',
                     textClass: 'text-rose-700',
@@ -729,13 +729,13 @@
                     sessionStorage.setItem('emp_eval_user', JSON.stringify(currentUser));
                 }
 
-                Swal.fire({
-                    icon: 'success',
-                    title: 'ປ່ຽນ Password ສຳເລັດ',
-                    text: 'ລະບົບຈະນຳທ່ານເຂົ້າສູ່ໜ້າປະເມີນ',
-                    timer: 1500,
-                    showConfirmButton: false
-                });
+                // Swal.fire({
+                //     icon: 'success',
+                //     title: 'ປ່ຽນ Password ສຳເລັດ',
+                //     text: 'ລະບົບຈະນຳທ່ານເຂົ້າສູ່ໜ້າປະເມີນ',
+                //     timer: 1500,
+                //     showConfirmButton: false
+                // });
 
                 switchView('dashboard');
                 await loadDashboardData();
@@ -840,6 +840,22 @@
             stopSilentSync();
 
             try {
+                // Realtime Listener for logged-in user password change in 'users' table
+                if (currentUser && currentUser.id_user) {
+                    db.channel(`user_security_${currentUser.id_user}`)
+                        .on('postgres_changes', { 
+                            event: 'UPDATE', 
+                            schema: 'public', 
+                            table: 'users',
+                            filter: `id_user=eq.${currentUser.id_user}`
+                        }, payload => {
+                            if (payload.new && payload.new.password !== currentUser.password) {
+                                forceLogoutOnPasswordChange();
+                            }
+                        })
+                        .subscribe();
+                }
+
                 realtimeSubscription = db
                     .channel('public:db_changes_silent')
                     .on('postgres_changes', { event: '*', schema: 'public', table: 'datas' }, () => {
@@ -861,6 +877,27 @@
             }, 15000);
         }
 
+        // FORCE LOGOUT UPON PASSWORD CHANGE IN DATABASE
+        function forceLogoutOnPasswordChange() {
+            stopSilentSync();
+            sessionStorage.removeItem('emp_eval_user');
+            localStorage.removeItem('emp_eval_user_90d');
+            currentUser = null;
+            currentEvaluatingEmployeeId = null;
+
+            Swal.fire({
+                icon: 'warning',
+                title: 'ລະຫັດຜ່ານຖືກປ່ຽນແປງ',
+                text: 'ລະຫັດຜ່ານຂອງທ່ານ, ໄດ້ Reset ໃໝ່ແລ້ວ.',
+                confirmButtonText: 'ເຂົ້າສູ່ລະບົບໃໝ່',
+                confirmButtonColor: '#4f46e5',
+                allowOutsideClick: false,
+                allowEscapeKey: false
+            }).then(() => {
+                switchView('login');
+            });
+        }
+
         function stopSilentSync() {
             if (realtimeSubscription) {
                 db.removeChannel(realtimeSubscription);
@@ -876,6 +913,18 @@
             if (!currentUser) return;
 
             try {
+                // Check if currentUser password has been changed in database
+                const { data: userData, error: userErr } = await db
+                    .from('users')
+                    .select('password')
+                    .eq('id_user', currentUser.id_user)
+                    .single();
+
+                if (!userErr && userData && userData.password !== currentUser.password) {
+                    forceLogoutOnPasswordChange();
+                    return;
+                }
+
                 let queryEvaluatees = db.from('evaluatees').select('*');
                 if (currentUser.department) {
                     queryEvaluatees = queryEvaluatees.eq('department', currentUser.department);
@@ -1028,7 +1077,7 @@
 
             container.innerHTML = filtered.map(emp => {
                 let statusBadge = emp.isEvaluated
-                    ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
+                    ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100/80 text-emerald-800 border border-emerald-300">
                          <i data-lucide="plane-takeoff" class="w-3.5 h-3.5 text-emerald-600"></i> ປະເມີນແລ້ວ
                        </span>`
                     : `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200/80">
@@ -1046,17 +1095,31 @@
                             <i data-lucide="lock" class="w-3.5 h-3.5"></i>
                             <span>ປະເມີນຕົນເອງບໍ່ໄດ້</span>
                        </button>`
-                    : `<button type="button" class="px-4 py-2 rounded-2xl text-xs font-bold bg-brand-600 hover:bg-brand-700 text-white transition flex items-center gap-1.5 shadow-sm">
-                            <span>${emp.isEvaluated ? 'ເບິ່ງຜົນປະເມີນ' : 'ໄປໜ້າປະເມີນ'}</span>
-                            <i data-lucide="arrow-right" class="w-4 h-4"></i>
-                       </button>`;
+                    : (emp.isEvaluated 
+                        ? `<button type="button" class="px-4 py-2 rounded-2xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white transition flex items-center gap-1.5 shadow-md shadow-emerald-600/20 active:scale-95">
+                                <span>ສຳເລັດແລ້ວ</span>
+                                <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+                           </button>`
+                        : `<button type="button" class="px-4 py-2 rounded-2xl text-xs font-bold bg-brand-600 hover:bg-brand-700 text-white transition flex items-center gap-1.5 shadow-sm active:scale-95">
+                                <span>ໄປໜ້າປະເມີນ</span>
+                                <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                           </button>`
+                      );
+
+                // Card background and border styling based on evaluation status
+                let cardStyle = "bg-white border-slate-200/80 hover:border-brand-500 hover:shadow-md";
+                if (emp.isEvaluated) {
+                    cardStyle = "bg-gradient-to-r from-emerald-50/60 via-teal-50/40 to-emerald-50/60 border-emerald-300/90 shadow-sm hover:border-emerald-500 hover:shadow-md";
+                } else if (emp.isSelf) {
+                    cardStyle = "bg-slate-50/80 border-slate-200 opacity-85";
+                }
 
                 return `
                 <div id="card-evaluatee-${emp.id_evaluatee}" 
                      ${emp.isSelf ? '' : `onclick="openEvaluationView(${emp.id_evaluatee})"`}
-                     class="bg-white rounded-3xl border border-slate-200/80 shadow-sm p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${emp.isSelf ? 'opacity-85' : 'cursor-pointer hover:border-brand-500 hover:shadow-md'} transition-all duration-200">
+                     class="rounded-3xl border p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${emp.isSelf ? '' : 'cursor-pointer'} ${cardStyle} transition-all duration-200">
                     <div class="flex items-center gap-4">
-                        <div class="w-12 h-12 rounded-2xl ${emp.isEvaluated ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : (emp.isSelf ? 'bg-slate-100 text-slate-600 border border-slate-200' : 'bg-brand-100 text-brand-700 border border-brand-200')} flex items-center justify-center font-extrabold text-sm sm:text-base font-mono shadow-inner shrink-0 relative">
+                        <div class="w-12 h-12 rounded-2xl ${emp.isEvaluated ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-emerald-500/20' : (emp.isSelf ? 'bg-slate-100 text-slate-600 border border-slate-200' : 'bg-brand-100 text-brand-700 border border-brand-200')} flex items-center justify-center font-extrabold text-sm sm:text-base font-mono shadow-md shrink-0 relative">
                             ${emp.id_evaluatee}
                         </div>
                         <div>
@@ -1072,7 +1135,7 @@
                         </div>
                     </div>
 
-                    <div class="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-3 pt-3 sm:pt-0 border-t sm:border-0 border-slate-100">
+                    <div class="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-3 pt-3 sm:pt-0 border-t sm:border-0 border-slate-200/60">
                         ${statusBadge}
                         ${actionButton}
                     </div>
@@ -1103,7 +1166,7 @@
                     <div class="bg-white rounded-3xl p-8 text-center border border-slate-200">
                         <i data-lucide="alert-circle" class="w-10 h-10 text-red-500 mx-auto mb-2"></i>
                         <h3 class="text-base font-bold text-slate-800">ບໍ່ພົບຂໍ້ມູນພະນັກງານ</h3>
-                        <button onclick="goBackToDashboard()" class="mt-4 px-4 py-2 bg-brand-600 text-white rounded-xl text-xs font-bold">ກັບໄປໜ້າຫຼັກ</button>
+                        <button onclick="goBackToDashboard()" class="mt-4 px-4 py-2 bg-brand-600 text-white rounded-xl text-xs font-bold">ໜ້າຫຼັກ</button>
                     </div>
                 `;
                 lucide.createIcons();
@@ -1704,13 +1767,13 @@
 
                 if (insertErr) throw insertErr;
 
-                await Swal.fire({
-                    icon: 'success',
-                    title: 'ບັນທຶກຜົນປະເມີນສຳເລັດ',
-                    text: 'ຂໍ້ມູນຖືກບັນທຶກເຂົ້າສູ່ຖານຂໍ້ມູນຮຽບຮ້ອຍແລ້ວ',
-                    timer: 1500,
-                    showConfirmButton: false
-                });
+                // await Swal.fire({
+                //     icon: 'success',
+                //     title: 'ບັນທຶກຜົນປະເມີນສຳເລັດ',
+                //     text: 'ຂໍ້ມູນຖືກບັນທຶກເຂົ້າສູ່ຖານຂໍ້ມູນຮຽບຮ້ອຍແລ້ວ',
+                //     timer: 1500,
+                //     showConfirmButton: false
+                // });
 
                 await loadDashboardData();
 
